@@ -36,7 +36,6 @@ module EX(
         end
     end
     
-    
 
     wire [31:0] ex_pc, inst;
     wire [11:0] alu_op;
@@ -51,10 +50,8 @@ module EX(
     reg is_in_delayslot;
 
 
-
     wire inst_mthi, inst_mtlo, inst_multu, inst_mult, inst_divu, inst_div;
     wire stallreq_for_mul;
-
 
 
     assign {
@@ -106,7 +103,6 @@ module EX(
     );
     
     assign ex_result = alu_result;
-
 
     
     assign ex_to_mem_bus = {
@@ -168,7 +164,6 @@ module EX(
     // MUL part
     wire [63:0] mul_result;
 
-    //*************原有的  booth-Wallace 乘法器*************************
     wire mul_signed; // 有符号乘法标记
     assign mul_signed =   inst_mult  ? 1 
                         : inst_multu ? 0 
@@ -186,7 +181,7 @@ module EX(
         .inb        (mul_data2    ), // 乘法源操作数2
         .result     (mul_result     ) // 乘法结果 64bit
     );
-    //*****************************************************************
+
 
 
     // DIV part
