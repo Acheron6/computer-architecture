@@ -26,22 +26,22 @@ module ID(
 );
 
     reg [`IF_TO_ID_WD-1:0] if_to_id_bus_r;
-    wire [31:0] inst;
-    wire [31:0] id_pc;
-    wire ce;
+    wire [31:0] inst;  // 当前指令
+    wire [31:0] id_pc; // 当前PC值
+    wire Clock_Enable; 
     
-    wire wb_rf_we;
-    wire [4:0] wb_rf_waddr;
-    wire [31:0] wb_rf_wdata;
+    wire wb_rf_we;            // WB阶段是否写寄存器（ID阶段使用）
+    wire [4:0] wb_rf_waddr;   // WB阶段写寄存器的地址（ID阶段使用）
+    wire [31:0] wb_rf_wdata;  // WB阶段写寄存器的数据（ID阶段使用）
 
     wire wb_id_we;
     wire [4:0] wb_id_waddr;
     wire [31:0] wb_id_wdata;
 
-    wire mem_id_we;
+    wire mem_id_we;  // MEM阶段是否写寄存器（ID阶段使用）
     wire [4:0] mem_id_waddr;
     wire [31:0] mem_id_wdata;
-    reg q;
+    reg stall_pipeline_signal;
     wire ex_id_we;
     wire [4:0] ex_id_waddr;
     wire [31:0] ex_id_wdata;
@@ -63,18 +63,18 @@ module ID(
 
     always @(posedge clk) begin
         if (stall[1]==`Stop) begin
-            q <= 1'b1;
+            stall_pipeline_signal <= 1'b1;
         end
         else begin
-            q <= 1'b0;
+            stall_pipeline_signal <= 1'b0;
         end
     end
-    assign inst = (q) ?inst: inst_sram_rdata;
+    assign inst = (stall_pipeline_signal) ?inst: inst_sram_rdata;
 
     //assign inst = inst_sram_rdata;
 
     assign {
-        ce,
+        Clock_Enable,
         id_pc
     } = if_to_id_bus_r;
     assign {
@@ -102,14 +102,17 @@ module ID(
     } = ex_to_id;
 
     wire [5:0] opcode;
-    wire [4:0] rs,rt,rd,sa;
+    wire [4:0] rs,  //Source Register
+                rt, //Target Register
+                rd, //Destination Register
+                sa; //Shift Amount
     wire [5:0] func;
     wire [15:0] imm;
-    wire [25:0] instr_index;
+    wire [25:0] instr_index;  // 指令索引
     wire [19:0] code;
     wire [4:0] base;
-    wire [15:0] offset;
-    wire [2:0] sel;
+    wire [15:0] offset;  // 偏移量
+    wire [2:0] sel;   // 选择信号
 
     wire [63:0] op_d, func_d;
     wire [31:0] rs_d, rt_d, rd_d, sa_d;
@@ -143,8 +146,8 @@ module ID(
         lo_data           // 31:0
     } = hilo_ex_to_id;
 
-    assign hi_r = inst_mfhi;
-    assign lo_r = inst_mflo;
+    assign hi_r = inst_mfhi;    //Move From HI
+    assign lo_r = inst_mflo;    //Move From LO
 
     regfile u_regfile(
     	.clk    (clk    ),
@@ -196,80 +199,7 @@ module ID(
     assign offset = inst[15:0];
     assign sel = inst[2:0];
 
-    wire inst_ori, inst_lui, inst_addiu, inst_beq,
-    //inst_ori 寄存器 rs 中的值与 0 扩展至 32 位的立即数 imm 按位逻辑或，结果写入寄存器 rt 中。
-    //inst_lui 将 16 位立即数 imm 写入寄存器 rt 的高 16 位，寄存器 rt 的低 16 位置 0
-    //inst_addiu 将寄存器 rs 的值与有符号扩展 ．．．．．至 32 位的立即数 imm 相加，结果写入 rt 寄存器中。
-    //inst_beq 如果寄存器 rs 的值等于寄存器 rt 的值则转移，否则顺序执行。转移目标由立即数 offset 左移 2 位
-               //并进行有符号扩展的值加上该分支指令对应的延迟槽指令的 PC 计算得到。
-    inst_subu,//将寄存器 rs 的值与寄存器 rt 的值相减，结果写入 rd 寄存器中
-    inst_jr,// 无条件跳转。跳转目标为寄存器 rs 中的值
-    inst_jal,//无条件跳转。跳转目标由该分支指令对应的延迟槽指令的 PC 的最高 4 位与立即数 instr_index 左移
-            //2 位后的值拼接得到。同时将该分支对应延迟槽指令之后的指令的 PC 值保存至第 31 号通用寄存
-            //器中。
-    inst_lw,//将 base 寄存器的值加上符号扩展后的立即数 offset 得到访存的虚地址，如果地址不是 4 的整数倍
-            //则触发地址错例外，否则据此虚地址从存储器中读取连续 4 个字节的值，写入到 rt 寄存器中。
-    inst_or,    //寄存器 rs 中的值与寄存器 rt 中的值按位逻辑或，结果写入寄存器 rd 中
-    inst_sll,   //由立即数 sa 指定移位量，对寄存器 rt 的值进行逻辑左移，结果写入寄存器 rd 中。
-    inst_addu,//将寄存器 rs 的值与寄存器 rt 的值相加，结果写入 rd 寄存器中 
-    inst_bne,//如果寄存器 rs 的值不等于寄存器 rt 的值则转移，否则顺序执行。转移目标由立即数 offset 左移 2
-              //位并进行有符号扩展的值加上该分支指令对应的延迟槽指令的 PC 计算得到
-    inst_xor,//寄存器 rs 中的值与寄存器 rt 中的值按位逻辑异或，结果写入寄存器 rd 中。
-    inst_xori,//寄存器 rs 中的值与 0 扩展至 32 位的立即数 imm 按位逻辑异或，结果写入寄存器 rt 中。
-    inst_nor,//寄存器 rs 中的值与寄存器 rt 中的值按位逻辑或非，结果写入寄存器 rd 中。
-    inst_sw,//将 base 寄存器的值加上符号扩展后的立即数 offset 得到访存的虚地址，如果地址不是 4 的整数倍
-            //则触发地址错例外，否则据此虚地址将 rt 寄存器存入存储器中。
-    inst_sltu,//将寄存器 rs 的值与寄存器 rt 中的值进行无符号数比较，如果寄存器 rs 中的值小，则寄存器 rd 置 1；
-              //否则寄存器 rd 置 0。
-    inst_slt,//将寄存器 rs 的值与寄存器 rt 中的值进行有符号数比较，如果寄存器 rs 中的值小，则寄存器 rd 置 1；
-             //否则寄存器 rd 置 0。
-    inst_slti,//将寄存器 rs 的值与有符号扩展至 32 位的立即数 imm 进行有符号数比较，如果寄存器 rs 中的值小，
-              //则寄存器 rt 置 1；否则寄存器 rt 置 0。
-    inst_sltiu,//将寄存器 rs 的值与有符号扩展 ．．．．．至 32 位的立即数 imm 进行无符号数比较，如果寄存器 rs 中的值小，
-               //则寄存器 rt 置 1；否则寄存器 rt 置 0。
-    inst_j,//无条件跳转。跳转目标由该分支指令对应的延迟槽指令的 PC 的最高 4 位与立即数 instr_index 左移
-           //2 位后的值拼接得到。
-    inst_add,//将寄存器 rs 的值与寄存器 rt 的值相加，结果写入寄存器 rd 中。如果产生溢出，则触发整型溢出例
-            //外（IntegerOverflow）。
-    inst_addi,//将寄存器 rs 的值与有符号扩展至 32 位的立即数 imm 相加，结果写入 rt 寄存器中。如果产生溢出，
-              // 则触发整型溢出例外（IntegerOverflow）。
-    inst_sub,//将寄存器 rs 的值与寄存器 rt 的值相减，结果写入 rd 寄存器中。如果产生溢出，则触发整型溢出例
-             //外（IntegerOverflow）。
-    inst_and,//寄存器 rs 中的值与寄存器 rt 中的值按位逻辑与，结果写入寄存器 rd 中。
-    inst_andi,//寄存器 rs 中的值与 0 扩展至 32 位的立即数 imm 按位逻辑与，结果写入寄存器 rt 中。
-    inst_sllv,//由寄存器 rs 中的值指定移位量，对寄存器 rt 的值进行逻辑左移，结果写入寄存器 rd 中。
-    inst_sra,//由立即数 sa 指定移位量，对寄存器 rt 的值进行算术右移，结果写入寄存器 rd 中。
-    inst_srav,//由寄存器 rs 中的值指定移位量，对寄存器 rt 的值进行算术右移，结果写入寄存器 rd 中。
-    inst_srl,//由立即数 sa 指定移位量，对寄存器 rt 的值进行逻辑右移，结果写入寄存器 rd 中。
-    inst_srlv,//由寄存器 rs 中的值指定移位量，对寄存器 rt 的值进行逻辑右移，结果写入寄存器 rd 中。
-    inst_bgez,//如果寄存器 rs 的值大于等于 0 则转移，否则顺序执行。转移目标由立即数 offset 左移 2 位并进行有
-              //符号扩展的值加上该分支指令对应的延迟槽指令的 PC 计算得到。
-    inst_bgtz,//如果寄存器 rs 的值大于 0 则转移，否则顺序执行。转移目标由立即数 offset 左移 2 位并进行有符号
-              //扩展的值加上该分支指令对应的延迟槽指令的 PC 计算得到。
-    inst_blez,//如果寄存器 rs 的值小于等于 0 则转移，否则顺序执行。转移目标由立即数 offset 左移 2 位并进行有
-              //符号扩展的值加上该分支指令对应的延迟槽指令的 PC 计算得到。
-    inst_bltz,//如果寄存器 rs 的值小于 0 则转移，否则顺序执行。转移目标由立即数 offset 左移 2 位并进行有符号
-              //扩展的值加上该分支指令对应的延迟槽指令的 PC 计算得到。
-    inst_bltzal,//如果寄存器 rs 的值小于 0 则转移，否则顺序执行。转移目标由立即数 offset 左移 2 位并进行有符号
-                //扩展的值加上该分支指令对应的延迟槽指令的 PC 计算得到。无论转移与否，将该分支对应延迟槽
-                //指令之后的指令的 PC 值保存至第 31 号通用寄存器中。
-    inst_bgezal,inst_jalr,inst_div,inst_divu,
-    inst_mflo,//将 LO 寄存器的值写入到寄存器 rd 中
-    inst_mfhi,//将 HI 寄存器的值写入到寄存器 rd 中
-    inst_mult,inst_multu,inst_mthi,inst_mtlo,inst_lb,
-    inst_lbu,//将 base 寄存器的值加上符号扩展后的立即数 offset 得到访存的虚地址，据此虚地址从存储器中读
-             //取 1 个字节的值并进行 0 扩展，写入到 rt 寄存器中
-    inst_lh,//将 base 寄存器的值加上符号扩展后的立即数 offset 得到访存的虚地址，如果地址不是 2 的整数倍
-            //则触发地址错例外，否则据此虚地址从存储器中读取连续 2 个字节的值并进行符号扩展，写入到
-            //rt 寄存器中。
-    inst_lhu,//将 base 寄存器的值加上符号扩展后的立即数 offset 得到访存的虚地址，如果地址不是 2 的整数倍
-             //则触发地址错例外，否则据此虚地址从存储器中读取连续 2 个字节的值并进行 0 扩展，写入到 rt
-             //寄存器中。
-    inst_sb, //将 base 寄存器的值加上符号扩展后的立即数 offset 得到访存的虚地址，据此虚地址将 rt 寄存器的
-             //最低字节存入存储器中。
-    inst_lsa,
-    inst_sh; //将 base 寄存器的值加上符号扩展后的立即数 offset 得到访存的虚地址，如果地址不是 2 的整数倍
-             //则触发地址错例外，否则据此虚地址将 rt 寄存器的低半字存入存储器中。
+    wire inst_ori, inst_lui, inst_addiu, inst_beq,inst_subu,inst_jr,inst_jal,inst_lw,inst_or, inst_sll, inst_addu,inst_bne,inst_xor,inst_xori,inst_nor,inst_sw,inst_sltu,inst_slt,inst_slti,inst_sltiu,inst_j,inst_add,inst_addi,inst_sub,inst_and,inst_andi,inst_sllv,inst_sra,inst_srav,inst_srl,inst_srlv,inst_bgez,inst_bgtz,inst_blez,inst_bltz,inst_bltzal,inst_bgezal,inst_jalr,inst_div,inst_divu,inst_mflo,inst_mfhi,inst_mult,inst_multu,inst_mthi,inst_mtlo,inst_lb,inst_lbu,inst_lh,inst_lhu,inst_sb, inst_lsa,inst_sh; 
     wire op_add, op_sub, op_slt, op_sltu;
     wire op_and, op_nor, op_or, op_xor;
     wire op_sll, op_srl, op_sra, op_lui;
